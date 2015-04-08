@@ -95,14 +95,53 @@ ENDIF(C_SSE4_2_FOUND)
 
 SET(hdr
   THGeneral.h THAllocator.h THStorage.h THTensor.h THTensorApply.h THBlas.h
-  THLapack.h THLogAdd.h THRandom.h THVector.h)
+  THLapack.h THLogAdd.h THRandom.h THVector.h THAtomic.h)
 
 SET(src
   THGeneral.c THAllocator.c THStorage.c THTensor.c THBlas.c THLapack.c
-  THLogAdd.c THRandom.c THFile.c THDiskFile.c THMemoryFile.c)
+  THLogAdd.c THRandom.c THFile.c THDiskFile.c THMemoryFile.c THAtomic.c)
 
 SET(src ${src} ${hdr})
 ADD_LIBRARY(TH SHARED ${src})
+
+CHECK_C_SOURCE_RUNS("
+#include <intrin.h>
+int main()
+{
+  long a;
+  _InterlockedExchange(&a, 1);
+  _InterlockedExchangeAdd(&a, 1);
+  _InterlockedCompareExchange(&a, 3, 2);
+  return 0;
+}
+" HAS_MSC_ATOMICS)
+
+CHECK_C_SOURCE_RUNS("
+int main()
+{
+  int a;
+  __sync_lock_test_and_set(&a, 1);
+  __sync_fetch_and_add(&a, 1);
+  __sync_bool_compare_and_swap(&a, 2, 3);
+  return 0;
+}
+" HAS_GCC_ATOMICS)
+
+IF(HAS_MSC_ATOMICS)
+  ADD_DEFINITIONS(-DUSE_MSC_ATOMICS=1)
+  MESSAGE(STATUS "Atomics: using MSVC intrinsics")
+ELSEIF(HAS_GCC_ATOMICS)
+  ADD_DEFINITIONS(-DUSE_GCC_ATOMICS=1)
+    MESSAGE(STATUS "Atomics: using GCC intrinsics")
+ELSE()
+  SET(CMAKE_THREAD_PREFER_PTHREAD TRUE)
+  FIND_PACKAGE(THREADS)
+  IF(THREADS_FOUND)
+    ADD_DEFINITIONS(-DUSE_PTHREAD_ATOMICS=1)
+    TARGET_LINK_LIBRARIES(TH ${CMAKE_THREAD_LIBS_INIT})
+    MESSAGE(STATUS "Atomics: using pthread")
+  ENDIF()
+ENDIF()
 
 FIND_PACKAGE(BLAS)
 IF(BLAS_FOUND)
@@ -195,6 +234,7 @@ INSTALL(FILES
   THTensorDimApply.h
   THTensorMacros.h
   THVector.h
+  THAtomic.h
   DESTINATION "${TH_INSTALL_INCLUDE_SUBDIR}/TH")
 
 INSTALL(FILES
